@@ -1,0 +1,152 @@
+setwd("/Users/ken/Documents/CANCERBIO/_PROJECTS/_PROJECT_2/_mock_grant/figures")
+
+library("survival")
+library("survminer")
+library("dplyr")
+
+# Get TGCA data from XenaBrowser
+# Bash scripts using system()
+system(wget "https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/survival%2FBRCA_survival.txt")
+system(wget "https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/TCGA.BRCA.sampleMap%2FBRCA_clinicalMatrix")
+system(wget "https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/TCGA.BRCA.sampleMap%2FHiSeqV2.gz")
+system(gunzip "TCGA.BRCA.sampleMap_HiSeqV2.gz")
+
+# Read data
+rna.seq <- as.matrix(read.table("TCGA.BRCA.sampleMap_HiSeqV2", sep="\t",header=TRUE,row.names = 1))
+clin.data <- read.table("TCGA.BRCA.sampleMap_BRCA_clinicalMatrix", sep= "\t", header=T, row.names=1)
+survival <- read.table("BRCA_survival.txt", sep="\t",header=TRUE, row.names = 1)
+
+# Fixing and alignlng data frames and matrices
+rownames(clin.data)<-gsub(rownames(clin.data), pattern="-", replace=".")
+rownames(survival)<-gsub(rownames(survival), pattern="-", replace=".")
+clin.data <- clin.data[colnames(rna.seq),]
+
+# RNAseq and survival
+OS.Time.rna <- survival[colnames(rna.seq),"OS.time"]
+OS.Event.rna <- as.numeric(survival[colnames(rna.seq),"OS"])
+OS.rna <- Surv(OS.Time.rna,OS.Event.rna)
+
+Results.OS_rna.seq<- array(NA, c(nrow(rna.seq),4))
+colnames(Results.OS_rna.seq)<-c("HR","LCI","UCI","PVAL")
+rownames(Results.OS_rna.seq)<-rownames(rna.seq)
+Results.OS_rna.seq <- as.data.frame(Results.OS_rna.seq)
+
+for(i in 1:nrow(rna.seq)){
+  coxphmodel <- coxph(OS.rna~ as.numeric(rna.seq[i,]))
+  Results.OS_rna.seq$HR[i] <- summary(coxphmodel)$coef[1,2]
+  Results.OS_rna.seq$LCI[i] <- summary(coxphmodel)$conf.int[1,3]
+  Results.OS_rna.seq$UCI[i] <- summary(coxphmodel)$conf.int[1,4]
+  Results.OS_rna.seq$PVAL[i] <- summary(coxphmodel)$coef[1,5]
+}
+
+Results.OS_rna.seq$FDR <- p.adjust(Results.OS_rna.seq$PVAL,method="fdr")
+Results.OS_rna.seq<-Results.OS_rna.seq[order(Results.OS_rna.seq$FDR, decreasing=F),]
+Results.OS_rna.seq["PRMT1",]
+
+# Stage
+stage.III <- grep("III", clin.data$pathologic_stage)
+stage.IV <- grep("IV", clin.data$pathologic_stage)
+stage.high <- rep(0, nrow((clin.data)))
+stage.high [c(stage.III,stage.IV)] <- 1
+
+# Stage cox regression
+coxph(OS.rna ~ stage.high)
+Results.OS_stage<-array(NA, c(nrow(rna.seq),4))
+colnames(Results.OS_stage)<-c("HR","LCI","UCI","PVAL")
+rownames(Results.OS_stage)<-rownames(rna.seq)
+Results.OS_stage<-as.data.frame(Results.OS_stage)
+
+for(i in 1:nrow(rna.seq)){
+  coxphmodel_stage <- coxph(OS.rna ~ stage.high)
+  Results.OS_stage$HR[i] <- summary(coxphmodel_stage)$coef[1,2]
+  Results.OS_stage$LCI[i] <- summary(coxphmodel_stage)$conf.int[1,3]
+  Results.OS_stage$UCI[i] <- summary(coxphmodel_stage)$conf.int[1,4]
+  Results.OS_stage$PVAL[i] <- summary(coxphmodel_stage)$coef[1,5]
+}
+Results.OS_stage$FDR <- p.adjust(Results.OS_stage$PVAL, method =  "fdr")
+
+summary(coxphmodel_stage)$coef[1,2]       # HR = 2.1847
+summary(coxphmodel_stage)$conf.int[1,3]   # LCI = 1.632361
+summary(coxphmodel_stage)$conf.int[1,4]   # HCI = 2.923933
+summary(coxphmodel_stage)$coef[1,5]
+
+# Receptor status
+TNBC.stat <- rep(0, nrow((clin.data)))
+TNBC.stat[clin.data$breast_carcinoma_estrogen_receptor_status =="Negative" &
+          clin.data$breast_carcinoma_progesterone_receptor_status =="Negative" &
+          clin.data$lab_proc_her2_neu_immunohistochemistry_receptor_status == "Negative"] <- 1
+
+# TNBC cox regression
+coxph(OS.rna ~ TNBC.stat)
+Results.OS_TNBC<-array(NA, c(nrow(rna.seq),4))
+colnames(Results.OS_TNBC)<-c("HR","LCI","UCI","PVAL")
+rownames(Results.OS_TNBC)<-rownames(rna.seq)
+Results.OS_TNBC<-as.data.frame(Results.OS_TNBC)
+
+for(i in 1:nrow(rna.seq)){
+  coxphmodel_TNBC <- coxph(OS.rna ~ TNBC.stat)
+  Results.OS_TNBC$HR[i] <- summary(coxphmodel_TNBC)$coef[1,2]
+  Results.OS_TNBC$LCI[i] <- summary(coxphmodel_TNBC)$conf.int[1,3]
+  Results.OS_TNBC$UCI[i] <- summary(coxphmodel_TNBC)$conf.int[1,4]
+  Results.OS_TNBC$PVAL[i] <- summary(coxphmodel_TNBC)$coef[1,5]
+}
+Results.OS_TNBC$FDR <- p.adjust(Results.OS_TNBC$PVAL, method =  "fdr")
+
+summary(coxphmodel_TNBC)$coef[1,2]       # HR = 1.216075
+summary(coxphmodel_TNBC)$conf.int[1,3]   # LCI = 0.7858219
+summary(coxphmodel_TNBC)$conf.int[1,4]   # HCI = 1.881901
+summary(coxphmodel_TNBC)$coef[1,5]
+
+# Multivariate
+Results.OS_rna.seq_fctrs<-array(NA, c(nrow(rna.seq),4))
+colnames(Results.OS_rna.seq_fctrs)<-c("HR","LCI","UCI","PVAL")
+rownames(Results.OS_rna.seq_fctrs)<-rownames(rna.seq)
+Results.OS_rna.seq_fctrs<-as.data.frame(Results.OS_rna.seq_fctrs)
+
+for(i in 1:nrow(rna.seq)){
+  coxphmodel3 <- coxph(OS.rna ~ as.numeric(rna.seq[i,]+TNBC.stat+stage.high))
+  Results.OS_rna.seq_fctrs$HR[i] <- summary(coxphmodel3)$coef[1,2]
+  Results.OS_rna.seq_fctrs$LCI[i] <- summary(coxphmodel3)$conf.int[1,3]
+  Results.OS_rna.seq_fctrs$UCI[i] <- summary(coxphmodel3)$conf.int[1,4]
+  Results.OS_rna.seq_fctrs$PVAL[i] <- summary(coxphmodel3)$coef[1,5]
+}
+
+Results.OS_rna.seq_fctrs <- as.data.frame(Results.OS_rna.seq_fctrs)
+Results.OS_rna.seq_fctrs$FDR <- p.adjust(Results.OS_rna.seq_fctrs$PVAL, method =  "fdr")
+Results.OS_rna.seq_fctrs<-Results.OS_rna.seq_fctrs[order(Results.OS_rna.seq_fctrs$FDR, decreasing=F),]
+
+# Summary PRMT1
+summary(rna.seq["PRMT1",])
+Results.OS_rna.seq["PRMT1",]        # Univariate cox regression
+Results.OS_stage["PRMT1",]          # Univariate cox regression - Stage 
+Results.OS_TNBC["PRMT1",]           # Univariate cox regression - TNBC
+Results.OS_rna.seq_fctrs["PRMT1",]  # Multivariate cox regression
+PRMT1.high <- as.numeric(rna.seq["PRMT1",]>mean(rna.seq["PRMT1",]))
+
+
+# plot
+png("KM_plot.png", width=9,height=4,units='in',res=300)
+grid <- matrix(c(1,2,3), nrow = 1, ncol = 3, byrow = T)
+layout(grid)
+plot(survfit(OS.rna ~ PRMT1.high), col=c("#B10026", "#0D4A70"),
+     lwd=2,mark.time=TRUE, xlab="OS Time (days)", ylab="Survival Probability")
+legend("bottomleft",legend=c("High PRMT1 expression","Low PRMT1 expression"),
+       col=c("#0D4A70","#B10026"),lwd=3)
+text(2900,0.15,"HR=0.76 (95% CI, 0.59-0.97)")
+text(350,0.20, "FDR")
+text(1600,0.20, "> 0.05")
+plot(survfit(OS.rna ~ stage.high), col=c("#B10026", "#0D4A70"),
+     lwd=2,mark.time=TRUE, xlab="OS Time (days)", ylab="Survival Probability")
+legend("bottomleft",legend=c("Stage III and IV","Stage I and II"),
+       col=c("#0D4A70","#B10026"),lwd=3)
+text(2900,0.15,"HR=2.19 (95% CI, 1.63-2.92)")
+text(350,0.20, "FDR")
+text(1700,0.20, "< 0.001")
+plot(survfit(OS.rna ~ TNBC.stat), col=c("#B10026", "#0D4A70"),
+     lwd=2,mark.time=TRUE, xlab="OS Time (days)", ylab="Survival Probability")
+legend("bottomleft",legend=c("TNBC","Not TNBC"),
+       col=c("#0D4A70","#B10026"),lwd=3)
+text(2900,0.15,"HR=1.21 (95% CI, 0.78-1.88)")
+text(350,0.20, "FDR")
+text(1600,0.20, "> 0.05")
+dev.off()
